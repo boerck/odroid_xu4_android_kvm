@@ -234,7 +234,7 @@ static void create_hyp_pte_mappings(pmd_t *pmd, unsigned long start,
 		pte = pte_offset_kernel(pmd, addr);
 		kvm_set_pte(pte, pfn_pte(pfn, prot));
 		get_page(virt_to_page(pte));
-		kvm_flush_dcache_to_poc(pte, sizeof(*pte));
+		kvm_flush_dcache_to_pou(pte, sizeof(*pte));
 		pfn++;
 	} while (addr += PAGE_SIZE, addr != end);
 }
@@ -261,7 +261,7 @@ static int create_hyp_pmd_mappings(pud_t *pud, unsigned long start,
 			}
 			pmd_populate_kernel(NULL, pmd, pte);
 			get_page(virt_to_page(pmd));
-			kvm_flush_dcache_to_poc(pmd, sizeof(*pmd));
+			kvm_flush_dcache_to_pou(pmd, sizeof(*pmd));
 		}
 
 		next = pmd_addr_end(addr, end);
@@ -299,7 +299,7 @@ static int __create_hyp_mappings(pgd_t *pgdp,
 			}
 			pud_populate(NULL, pud, pmd);
 			get_page(virt_to_page(pud));
-			kvm_flush_dcache_to_poc(pud, sizeof(*pud));
+			kvm_flush_dcache_to_pou(pud, sizeof(*pud));
 		}
 
 		next = pgd_addr_end(addr, end);
@@ -313,6 +313,17 @@ out:
 	return err;
 }
 
+static phys_addr_t kvm_kaddr_to_phys(void *kaddr)
+{
+	if (!is_vmalloc_addr(kaddr)) {
+		BUG_ON(!virt_addr_valid(kaddr));
+		return __pa(kaddr);
+	} else {
+		return page_to_phys(vmalloc_to_page(kaddr)) +
+		       offset_in_page(kaddr);
+	}
+}
+
 /**
  * create_hyp_mappings - duplicate a kernel virtual address range in Hyp mode
  * @from:	The virtual kernel start address of the range
@@ -324,16 +335,27 @@ out:
  */
 int create_hyp_mappings(void *from, void *to)
 {
-	unsigned long phys_addr = virt_to_phys(from);
+	phys_addr_t phys_addr;
+	unsigned long virt_addr;
 	unsigned long start = KERN_TO_HYP((unsigned long)from);
 	unsigned long end = KERN_TO_HYP((unsigned long)to);
 
-	/* Check for a valid kernel memory mapping */
-	if (!virt_addr_valid(from) || !virt_addr_valid(to - 1))
-		return -EINVAL;
+	start = start & PAGE_MASK;
+	end = PAGE_ALIGN(end);
 
-	return __create_hyp_mappings(hyp_pgd, start, end,
-				     __phys_to_pfn(phys_addr), PAGE_HYP);
+	for (virt_addr = start; virt_addr < end; virt_addr += PAGE_SIZE) {
+		int err;
+
+		phys_addr = kvm_kaddr_to_phys(from + virt_addr - start);
+		err = __create_hyp_mappings(hyp_pgd, virt_addr,
+					    virt_addr + PAGE_SIZE,
+					    __phys_to_pfn(phys_addr),
+					    PAGE_HYP);
+		if (err)
+			return err;
+	}
+
+	return 0;
 }
 
 /**
@@ -383,7 +405,7 @@ int kvm_alloc_stage2_pgd(struct kvm *kvm)
 		return -ENOMEM;
 
 	/* stage-2 pgd must be aligned to its size */
-	VM_BUG_ON((unsigned long)pgd & (S2_PGD_SIZE - 1));
+	VM_BUG_ON((unsigned long)pgd & (PAGE_SIZE * S2_PGD_SIZE - 1));
 
 	memset(pgd, 0, PTRS_PER_S2_PGD * sizeof(pgd_t));
 	kvm_clean_pgd(pgd);
@@ -425,6 +447,7 @@ void kvm_free_stage2_pgd(struct kvm *kvm)
 		return;
 
 	unmap_stage2_range(kvm, 0, KVM_PHYS_SIZE);
+	kvm_tlb_flush_vmid_ipa(kvm, 0); /* Invalidate TLB ALL */
 	free_pages((unsigned long)kvm->arch.pgd, S2_PGD_ORDER);
 	kvm->arch.pgd = NULL;
 }
