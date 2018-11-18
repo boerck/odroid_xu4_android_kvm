@@ -857,6 +857,16 @@
 		exynos_contig_heap {
 			id-type = <4 6>;
 		};
+
+		timer {
+            		compatible = "arm,cortex-a15-timer",
+                	         	"arm,armv7-timer";
+            		interrupts = <1 13 0xf08>,
+                	         	<1 14 0xf08>,
+                	         	<1 11 0xf08>,
+                	         	<1 10 0xf08>;
+            		clock-frequency = <24000000>;
+    		};
 	};
 
 	power_supply {\
