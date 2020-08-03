@@ -2,7 +2,6 @@
 
 #odroid-xu4 android kvm test kernel by boerck
 #you can use this file by terminal "bash build_kernel.sh"
-#you don't need to use root like "sudo" or "su"
 
 
 

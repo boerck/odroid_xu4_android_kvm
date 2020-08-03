@@ -11,5 +11,4 @@ you can build and use if you want
 * dts edit for KVM
 
 ### How to build
-* do not use root for building kernel
 * just "bash build_kernel.sh" in your kernel folder
